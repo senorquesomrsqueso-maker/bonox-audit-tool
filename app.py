@@ -265,7 +265,8 @@ def motor_auditor_universal_v32(urls):
         url = limpiar_url_táctica(raw_url)
         status_text.markdown(f"🔍 **AUDITANDO ({i+1}/{len(urls)}):** `{url[:50]}...`")
         
-     ydl_opts = {
+# Configuración blindada para evitar bloqueos de Instagram
+        ydl_opts = {
             'quiet': True,
             'ignoreerrors': True,
             'skip_download': True,
@@ -280,6 +281,7 @@ def motor_auditor_universal_v32(urls):
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1'
             }
+        }
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
