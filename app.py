@@ -265,13 +265,21 @@ def motor_auditor_universal_v32(urls):
         url = limpiar_url_táctica(raw_url)
         status_text.markdown(f"🔍 **AUDITANDO ({i+1}/{len(urls)}):** `{url[:50]}...`")
         
-        ydl_opts = {
+     ydl_opts = {
             'quiet': True,
             'ignoreerrors': True,
             'skip_download': True,
             'no_warnings': True,
-            'http_headers': {'User-Agent': random.choice(user_agents)},
-            'extract_flat': False
+            'extract_flat': False,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://www.instagram.com/',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
         }
         
         try:
