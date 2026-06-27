@@ -282,6 +282,8 @@ def motor_auditor_universal_v32(urls):
                     titulo_raw = info.get('title', 'N/A')
                     vistas = int(info.get('view_count') or 0)
                     likes = int(info.get('like_count') or 0)
+                    comments = int(info.get('comment_count') or 0)
+                    saves = int(info.get('repost_count') or 0)
                     tipo = obtener_tipo_video(url, info)
                     plataforma = tipo.split(' ')[0].upper()
 
@@ -306,6 +308,8 @@ def motor_auditor_universal_v32(urls):
                         "Título": titulo_raw[:65],
                         "Vistas": vistas,
                         "Likes": likes,
+                        "Comments": comments,
+                        "Saves": saves,
                         "Link": url
                     })
                 else:
@@ -365,6 +369,9 @@ def motor_busqueda_temporal(urls_canales, f_start, f_end, min_views):
                                     "Fuente": info.get('title', 'N/A'),
                                     "Título": vid.get('title', 'N/A')[:60],
                                     "Vistas": int(v_views),
+                                    "Likes": int(vid.get('like_count') or 0),
+                                    "Comments": int(vid.get('comment_count') or 0),
+                                    "Saves": int(vid.get('repost_count') or 0),
                                     "Link": vid.get('url') or vid.get('webpage_url') or url
                                 })
         except:
