@@ -280,7 +280,6 @@ def motor_auditor_universal_v32(urls):
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1'
             }
-        }
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
