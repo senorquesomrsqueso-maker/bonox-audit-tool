@@ -5,6 +5,7 @@ import re
 import datetime
 import random
 import os
+import instaloader
 
 # ==============================================================================
 # 1. CONFIGURACIÓN ESTRUCTURAL BONOX
@@ -213,8 +214,8 @@ def limpiar_url_táctica(url):
             
     return url
 
-def obtener_tipo_video(url, info_dict):
-    """Determina la categoría exacta del contenido."""
+def obtener_tipo_video(url, info_dict=None):
+    """Determina la categoría exacta del contenido. Permite validación temprana."""
     url_l = url.lower()
     if "facebook.com" in url_l or "fb.watch" in url_l or "fb.com" in url_l:
         return "Facebook Video"
@@ -228,7 +229,7 @@ def obtener_tipo_video(url, info_dict):
         return "Instagram Post"
     
     if "youtube.com" in url_l or "youtu.be" in url_l:
-        duration = info_dict.get('duration', 0)
+        duration = info_dict.get('duration', 0) if info_dict else 0
         if "/shorts/" in url_l or (duration and duration <= 65):
             return "YouTube Shorts"
         return "YouTube Video"
@@ -256,6 +257,12 @@ def motor_auditor_universal_v32(urls):
     p_bar = st.progress(0)
     status_text = st.empty()
     
+    # Inicialización del motor exclusivo para Instagram
+    try:
+        ig_loader = instaloader.Instaloader(quiet=True)
+    except Exception:
+        ig_loader = None
+    
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -265,67 +272,105 @@ def motor_auditor_universal_v32(urls):
         url = limpiar_url_táctica(raw_url)
         status_text.markdown(f"🔍 **AUDITANDO ({i+1}/{len(urls)}):** `{url[:50]}...`")
         
-# Configuración blindada para evitar bloqueos de Instagram
-        ydl_opts = {
-            'quiet': True,
-            'ignoreerrors': True,
-            'skip_download': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': 'https://www.instagram.com/',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            }
-        }
+        # Determinación temprana de plataforma para bifurcar motores
+        tipo_preliminar = obtener_tipo_video(url)
+        plataforma = tipo_preliminar.split(' ')[0].upper()
         
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+        # ==========================================================
+        # MOTOR INSTAGRAM (Instaloader API nativa)
+        # ==========================================================
+        if plataforma == 'INSTAGRAM':
+            try:
+                if not ig_loader:
+                    raise Exception("Motor Instaloader no disponible.")
+                    
+                match = re.search(r'/(?:p|reel|reels|tv)/([^/?#&]+)', url)
+                if not match:
+                    raise Exception("Formato de URL de Instagram no reconocido.")
                 
-                if info:
-                    titulo_raw = info.get('title', 'N/A')
-                    vistas = int(info.get('view_count') or 0)
-                    likes = int(info.get('like_count') or 0)
-                    comments = int(info.get('comment_count') or 0)
-                    saves = int(info.get('repost_count') or 0)
-                    tipo = obtener_tipo_video(url, info)
-                    plataforma = tipo.split(' ')[0].upper()
+                shortcode = match.group(1)
+                post = instaloader.Post.from_shortcode(ig_loader.context, shortcode)
+                
+                vistas = post.video_view_count if post.is_video else 0
+                likes = post.likes
+                comments = post.comments
+                titulo_raw = post.caption[:65] if post.caption else "Instagram Content"
+                
+                resultados.append({
+                    "ID": i + 1,
+                    "Plataforma": plataforma,
+                    "Tipo": tipo_preliminar,
+                    "Creador": post.owner_username,
+                    "Título": titulo_raw,
+                    "Vistas": vistas,
+                    "Likes": likes,
+                    "Comments": comments,
+                    "Saves": 0, # Métrica privada en IG
+                    "Link": url
+                })
+            except Exception as e_ig:
+                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": f"Error Instagram: {str(e_ig)[:40]}"})
+                
+        # ==========================================================
+        # MOTOR CLÁSICO FB / YT / TK (YT-DLP)
+        # ==========================================================
+        else:
+            ydl_opts = {
+                'quiet': True,
+                'ignoreerrors': True,
+                'skip_download': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'http_headers': {
+                    'User-Agent': random.choice(user_agents)
+                }
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    
+                    if info:
+                        titulo_raw = info.get('title', 'N/A')
+                        vistas = int(info.get('view_count') or 0)
+                        likes = int(info.get('like_count') or 0)
+                        comments = int(info.get('comment_count') or 0)
+                        saves = int(info.get('repost_count') or 0)
+                        
+                        # Recalcular tipo para determinar si YT es Short o Largo según duración
+                        tipo_final = obtener_tipo_video(url, info)
+                        plataforma_final = tipo_final.split(' ')[0].upper()
 
-                    # Parche FB
-                    if plataforma == 'FACEBOOK':
-                        match_fb = re.search(r"([\d\.]+[KMkm]?)\s*views.*?([\d\.]+[KMkm]?)\s*reactions\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
-                        if match_fb:
-                            vistas = convertir_k_m(match_fb.group(1))
-                            likes = convertir_k_m(match_fb.group(2))
-                            titulo_raw = match_fb.group(3).strip()
-                        else:
-                            match_fb_views = re.search(r"([\d\.]+[KMkm]?)\s*views\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
-                            if match_fb_views:
-                                vistas = convertir_k_m(match_fb_views.group(1))
-                                titulo_raw = match_fb_views.group(2).strip()
+                        # Parche FB
+                        if plataforma_final == 'FACEBOOK':
+                            match_fb = re.search(r"([\d\.]+[KMkm]?)\s*views.*?([\d\.]+[KMkm]?)\s*reactions\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
+                            if match_fb:
+                                vistas = convertir_k_m(match_fb.group(1))
+                                likes = convertir_k_m(match_fb.group(2))
+                                titulo_raw = match_fb.group(3).strip()
+                            else:
+                                match_fb_views = re.search(r"([\d\.]+[KMkm]?)\s*views\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
+                                if match_fb_views:
+                                    vistas = convertir_k_m(match_fb_views.group(1))
+                                    titulo_raw = match_fb_views.group(2).strip()
 
-                    resultados.append({
-                        "ID": i + 1,
-                        "Plataforma": plataforma,
-                        "Tipo": tipo,
-                        "Creador": info.get('uploader', 'N/A'),
-                        "Título": titulo_raw[:65],
-                        "Vistas": vistas,
-                        "Likes": likes,
-                        "Comments": comments,
-                        "Saves": saves,
-                        "Link": url
-                    })
-                else:
-                    fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Sin respuesta / Privado / Bloqueado"})
-        
-        except Exception as e_scrap:
-            fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e_scrap)[:50]})
+                        resultados.append({
+                            "ID": i + 1,
+                            "Plataforma": plataforma_final,
+                            "Tipo": tipo_final,
+                            "Creador": info.get('uploader', 'N/A'),
+                            "Título": titulo_raw[:65],
+                            "Vistas": vistas,
+                            "Likes": likes,
+                            "Comments": comments,
+                            "Saves": saves,
+                            "Link": url
+                        })
+                    else:
+                        fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Sin respuesta / Privado / Bloqueado"})
+            
+            except Exception as e_scrap:
+                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e_scrap)[:50]})
         
         p_bar.progress((i + 1) / len(urls))
     
