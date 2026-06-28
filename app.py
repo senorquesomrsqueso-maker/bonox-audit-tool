@@ -20,6 +20,9 @@ st.set_page_config(
 
 fecha_actual_global = datetime.datetime.now().strftime("%Y-%m-%d")
 
+# === LLAVE DE ACCESO INSTAGRAM ===
+IG_SESSIONID = "68792015363%3AnICh4nAu7oS2TO%3A15%3AAYguwyk6ZNAt1JxPen10_vvMnfzNC9pgXinP7_cfmG0"
+
 # ==============================================================================
 # 2. CAPA DE DISEÑO VISUAL "BONOX EXECUTIVE" (BLANCO Y DORADO)
 # ==============================================================================
@@ -257,9 +260,17 @@ def motor_auditor_universal_v32(urls):
     p_bar = st.progress(0)
     status_text = st.empty()
     
-    # Inicialización del motor exclusivo para Instagram
+    # ==========================================================
+    # INICIALIZACIÓN BLINDADA DEL MOTOR INSTAGRAM (CON COOKIE)
+    # ==========================================================
     try:
         ig_loader = instaloader.Instaloader(quiet=True)
+        # Inyectamos el User-Agent de un navegador real
+        ig_loader.context._session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'})
+        
+        # Inyectamos la cookie maestra para saltar el muro
+        if IG_SESSIONID and IG_SESSIONID != "PEGA_AQUI_EL_VALOR_DE_TU_SESSIONID":
+            ig_loader.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
     except Exception:
         ig_loader = None
     
@@ -272,13 +283,9 @@ def motor_auditor_universal_v32(urls):
         url = limpiar_url_táctica(raw_url)
         status_text.markdown(f"🔍 **AUDITANDO ({i+1}/{len(urls)}):** `{url[:50]}...`")
         
-        # Determinación temprana de plataforma para bifurcar motores
         tipo_preliminar = obtener_tipo_video(url)
         plataforma = tipo_preliminar.split(' ')[0].upper()
         
-        # ==========================================================
-        # MOTOR INSTAGRAM (Instaloader API nativa)
-        # ==========================================================
         if plataforma == 'INSTAGRAM':
             try:
                 if not ig_loader:
@@ -289,6 +296,8 @@ def motor_auditor_universal_v32(urls):
                     raise Exception("Formato de URL de Instagram no reconocido.")
                 
                 shortcode = match.group(1)
+                
+                # Extracción directa
                 post = instaloader.Post.from_shortcode(ig_loader.context, shortcode)
                 
                 vistas = post.video_view_count if post.is_video else 0
@@ -301,76 +310,52 @@ def motor_auditor_universal_v32(urls):
                     "Plataforma": plataforma,
                     "Tipo": tipo_preliminar,
                     "Creador": post.owner_username,
-                    "Título": titulo_raw,
+                    "Título": titulo_raw.replace('\n', ' '), # Limpieza de saltos de línea
                     "Vistas": vistas,
                     "Likes": likes,
                     "Comments": comments,
-                    "Saves": 0, # Métrica privada en IG
+                    "Saves": 0, 
                     "Link": url
                 })
             except Exception as e_ig:
-                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": f"Error Instagram: {str(e_ig)[:40]}"})
+                # Si falla, te dirá exactamente por qué (ej. "Login Required" si la cookie caducó)
+                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": f"Fallo IG: {str(e_ig)[:40]}"})
                 
-        # ==========================================================
-        # MOTOR CLÁSICO FB / YT / TK (YT-DLP)
-        # ==========================================================
         else:
+            # === RESTO DEL CÓDIGO CLÁSICO (YT/FB/TK) SE MANTIENE IGUAL ===
             ydl_opts = {
-                'quiet': True,
-                'ignoreerrors': True,
-                'skip_download': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'http_headers': {
-                    'User-Agent': random.choice(user_agents)
-                }
+                'quiet': True, 'ignoreerrors': True, 'skip_download': True, 'no_warnings': True,
+                'extract_flat': False, 'http_headers': {'User-Agent': random.choice(user_agents)}
             }
-            
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    
                     if info:
                         titulo_raw = info.get('title', 'N/A')
                         vistas = int(info.get('view_count') or 0)
                         likes = int(info.get('like_count') or 0)
                         comments = int(info.get('comment_count') or 0)
                         saves = int(info.get('repost_count') or 0)
-                        
-                        # Recalcular tipo para determinar si YT es Short o Largo según duración
                         tipo_final = obtener_tipo_video(url, info)
                         plataforma_final = tipo_final.split(' ')[0].upper()
 
-                        # Parche FB
                         if plataforma_final == 'FACEBOOK':
                             match_fb = re.search(r"([\d\.]+[KMkm]?)\s*views.*?([\d\.]+[KMkm]?)\s*reactions\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
                             if match_fb:
-                                vistas = convertir_k_m(match_fb.group(1))
-                                likes = convertir_k_m(match_fb.group(2))
-                                titulo_raw = match_fb.group(3).strip()
+                                vistas = convertir_k_m(match_fb.group(1)); likes = convertir_k_m(match_fb.group(2)); titulo_raw = match_fb.group(3).strip()
                             else:
                                 match_fb_views = re.search(r"([\d\.]+[KMkm]?)\s*views\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
                                 if match_fb_views:
-                                    vistas = convertir_k_m(match_fb_views.group(1))
-                                    titulo_raw = match_fb_views.group(2).strip()
+                                    vistas = convertir_k_m(match_fb_views.group(1)); titulo_raw = match_fb_views.group(2).strip()
 
                         resultados.append({
-                            "ID": i + 1,
-                            "Plataforma": plataforma_final,
-                            "Tipo": tipo_final,
-                            "Creador": info.get('uploader', 'N/A'),
-                            "Título": titulo_raw[:65],
-                            "Vistas": vistas,
-                            "Likes": likes,
-                            "Comments": comments,
-                            "Saves": saves,
-                            "Link": url
+                            "ID": i + 1, "Plataforma": plataforma_final, "Tipo": tipo_final,
+                            "Creador": info.get('uploader', 'N/A'), "Título": titulo_raw[:65],
+                            "Vistas": vistas, "Likes": likes, "Comments": comments,
+                            "Saves": saves, "Link": url
                         })
-                    else:
-                        fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Sin respuesta / Privado / Bloqueado"})
-            
-            except Exception as e_scrap:
-                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e_scrap)[:50]})
+                    else: fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Privado / Bloqueado"})
+            except Exception as e_scrap: fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e_scrap)[:50]})
         
         p_bar.progress((i + 1) / len(urls))
     
