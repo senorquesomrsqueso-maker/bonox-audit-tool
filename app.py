@@ -259,77 +259,149 @@ def convertir_k_m(valor_str):
     except:
         return 0
 
+def limpiar_url_instagram(url):
+    """Extrae el shortcode puro de un enlace de Instagram y lo formatea correctamente."""
+    url = url.split('?')[0] # Elimina parámetros de rastreo
+    match = re.search(r'instagram\.com/(?:p|reel|reels|tv)/([^/?]+)', url)
+    if match:
+        # Se estandariza siempre a /reel/ para facilitar la lectura de la API
+        return f"https://www.instagram.com/reel/{match.group(1)}/"
+    return url
+
 def motor_auditor_universal_v32(urls):
-    # Acceso a tus llaves desde los secretos de Streamlit
+    """Motor Híbrido: yt-dlp nativo + Triple Redundancia API para Instagram."""
+    
+    # 1. Carga de credenciales desde Streamlit Secrets
     API_APIFY = st.secrets.get("API_KEY_APIFY", "")
     API_RAPID = st.secrets.get("API_KEY_RAPID", "")
     API_SCRAPE = st.secrets.get("API_KEY_SCRAPE", "")
     
     resultados = []
     fallidos = []
+    
     p_bar = st.progress(0)
     status_text = st.empty()
     
-    # User-Agents para evitar bloqueos
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
     ]
 
     for i, raw_url in enumerate(urls):
         url = limpiar_url_táctica(raw_url)
-        status_text.markdown(f"🚀 **PROCESANDO ({i+1}/{len(urls)}):** `{url[:40]}...`")
+        status_text.markdown(f"🛡️ **AUDITORÍA SEGURA ({i+1}/{len(urls)}):** `{url[:40]}...`")
         
         tipo_preliminar = obtener_tipo_video(url)
         plataforma = tipo_preliminar.split(' ')[0].upper()
         
-        # --- LÓGICA DE INSTAGRAM (TRIPLE REDUNDANCIA) ---
+        # ==============================================================================
+        # 🟢 LÓGICA INSTAGRAM (TRIPLE BYPASS)
+        # ==============================================================================
         if plataforma == 'INSTAGRAM':
             data_ig = None
+            url_ig_limpia = limpiar_url_instagram(url)
             
-            # Intento 1: Apify
-            if not data_ig and API_APIFY:
-                try:
-                    # [INSERTA AQUÍ TU CÓDIGO DE REQUEST PARA APIFY]
-                    # data_ig = procesar_respuesta_apify(response)
-                    pass 
-                except Exception: pass
-
-            # Intento 2: RapidAPI (Respaldo 1)
+            # --- INTENTO 1: RAPIDAPI (Prioridad por velocidad) ---
             if not data_ig and API_RAPID:
                 try:
-                    # [INSERTA AQUÍ TU CÓDIGO DE REQUEST PARA RAPIDAPI]
-                    # data_ig = procesar_respuesta_rapid(response)
-                    pass
-                except Exception: pass
-            
-            # Intento 3: Scrape API (Respaldo 2)
+                    RAPID_HOST = "instagram-scraper-stable-api.p.rapidapi.com" # Ajusta si tu host es diferente
+                    endpoint = "/detailed_reel_data" if "/reel" in url_ig_limpia else "/detailed_post_data"
+                    
+                    headers = {
+                        "x-rapidapi-key": API_RAPID,
+                        "x-rapidapi-host": RAPID_HOST
+                    }
+                    response = requests.get(f"https://{RAPID_HOST}{endpoint}", headers=headers, params={"url": url_ig_limpia}, timeout=12)
+                    
+                    if response.status_code == 200:
+                        raw = response.json()
+                        item = raw.get('data', raw)
+                        if item and isinstance(item, dict):
+                            data_ig = {
+                                'owner': item.get('owner', {}).get('username', 'N/A'),
+                                'title': item.get('caption', 'N/A'),
+                                'views': int(item.get('video_view_count') or item.get('play_count') or 0),
+                                'likes': int(item.get('like_count') or 0),
+                                'comments': int(item.get('comment_count') or 0)
+                            }
+                except Exception:
+                    pass # Falla silenciosa, salta al intento 2
+
+            # --- INTENTO 2: APIFY (Respaldo robusto) ---
+            if not data_ig and API_APIFY:
+                try:
+                    # Lógica estándar para llamar a un Actor de Apify (requiere el ID del actor)
+                    apify_url = f"https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?token={API_APIFY}"
+                    payload = {"directUrls": [url_ig_limpia], "resultsType": "details"}
+                    response = requests.post(apify_url, json=payload, timeout=20)
+                    
+                    if response.status_code in [200, 201]:
+                        datos = response.json()
+                        if isinstance(datos, list) and len(datos) > 0:
+                            item = datos[0]
+                            data_ig = {
+                                'owner': item.get('ownerUsername', 'N/A'),
+                                'title': item.get('caption', 'N/A'),
+                                'views': int(item.get('videoViewCount') or 0),
+                                'likes': int(item.get('likesCount') or 0),
+                                'comments': int(item.get('commentsCount') or 0)
+                            }
+                except Exception:
+                    pass # Falla silenciosa, salta al intento 3
+
+            # --- INTENTO 3: SCRAPERAPI (Último recurso - Proxy Crudo) ---
             if not data_ig and API_SCRAPE:
                 try:
-                    # [INSERTA AQUÍ TU CÓDIGO DE REQUEST PARA SCRAPEAPI]
-                    # data_ig = procesar_respuesta_scrape(response)
+                    # ScraperAPI devuelve el HTML puro. Usamos JSON embebido de IG.
+                    params = {'api_key': API_SCRAPE, 'url': url_ig_limpia + "?__a=1&__d=dis"}
+                    response = requests.get('https://api.scraperapi.com/', params=params, timeout=15)
+                    
+                    if response.status_code == 200 and 'graphql' in response.text:
+                        raw = response.json()
+                        item = raw.get('graphql', {}).get('shortcode_media', {})
+                        if item:
+                            data_ig = {
+                                'owner': item.get('owner', {}).get('username', 'N/A'),
+                                'title': "Instagram Post",
+                                'views': int(item.get('video_view_count') or 0),
+                                'likes': int(item.get('edge_media_preview_like', {}).get('count') or 0),
+                                'comments': int(item.get('edge_media_to_parent_comment', {}).get('count') or 0)
+                            }
+                except Exception:
                     pass
-                except Exception: pass
 
+            # --- EVALUACIÓN FINAL DE INSTAGRAM ---
             if data_ig:
+                # Limpieza de saltos de línea en el título para la tabla
+                titulo_limpio = str(data_ig['title']).replace('\n', ' ')[:65]
+                
                 resultados.append({
                     "ID": i + 1, "Plataforma": "INSTAGRAM", "Tipo": tipo_preliminar,
-                    "Creador": data_ig.get('owner', 'N/A'), "Título": data_ig.get('title', 'N/A'),
-                    "Vistas": data_ig.get('views', 0), "Likes": data_ig.get('likes', 0),
-                    "Comments": data_ig.get('comments', 0), "Saves": 0, "Link": url
+                    "Creador": data_ig['owner'], "Título": titulo_limpio,
+                    "Vistas": data_ig['views'], "Likes": data_ig['likes'],
+                    "Comments": data_ig['comments'], "Saves": 0, "Link": url
                 })
             else:
-                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Todas las APIs de IG fallaron"})
+                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "IG Error: Muro detectado en las 3 APIs"})
 
-        # --- LÓGICA DE OTRAS PLATAFORMAS (YT/FB/TK) ---
+        # ==============================================================================
+        # 🔵 LÓGICA PLATAFORMAS ABIERTAS (YOUTUBE, FACEBOOK, TIKTOK)
+        # ==============================================================================
         else:
             ydl_opts = {
-                'quiet': True, 'ignoreerrors': True, 'skip_download': True, 'no_warnings': True,
-                'extract_flat': False, 'http_headers': {'User-Agent': random.choice(user_agents)}
+                'quiet': True,
+                'ignoreerrors': True,
+                'skip_download': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'http_headers': {'User-Agent': random.choice(user_agents)}
             }
+            
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
+                    
                     if info:
                         titulo_raw = info.get('title', 'N/A')
                         vistas = int(info.get('view_count') or 0)
@@ -337,22 +409,34 @@ def motor_auditor_universal_v32(urls):
                         comments = int(info.get('comment_count') or 0)
                         saves = int(info.get('repost_count') or 0)
                         
-                        # Parche FB (si usas la función convertir_k_m)
+                        # Parche de extracción táctica para Facebook
                         if plataforma == 'FACEBOOK':
-                            # ... tu lógica de limpieza de FB aquí ...
-                            pass
+                            match_fb = re.search(r"([\d\.]+[KMkm]?)\s*views.*?([\d\.]+[KMkm]?)\s*reactions\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
+                            if match_fb:
+                                vistas = convertir_k_m(match_fb.group(1))
+                                likes = convertir_k_m(match_fb.group(2))
+                                titulo_raw = match_fb.group(3).strip()
+                            else:
+                                match_fb_views = re.search(r"([\d\.]+[KMkm]?)\s*views\s*\|\s*(.*)", titulo_raw, re.IGNORECASE)
+                                if match_fb_views:
+                                    vistas = convertir_k_m(match_fb_views.group(1))
+                                    titulo_raw = match_fb_views.group(2).strip()
+
+                        titulo_limpio = str(titulo_raw).replace('\n', ' ')[:65]
 
                         resultados.append({
                             "ID": i + 1, "Plataforma": plataforma, "Tipo": tipo_preliminar,
-                            "Creador": info.get('uploader', 'N/A'), "Título": titulo_raw[:65],
+                            "Creador": info.get('uploader', 'N/A'), "Título": titulo_limpio,
                             "Vistas": vistas, "Likes": likes, "Comments": comments,
                             "Saves": saves, "Link": url
                         })
                     else:
-                        fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Privado / No detectado"})
-            except Exception as e:
-                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e)[:30]})
+                        fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Privado / Oculto / No detectado"})
+            
+            except Exception as e_scrap:
+                fallidos.append({"ID": i + 1, "Link": raw_url, "Error": str(e_scrap)[:35]})
         
+        # Actualización de la barra de progreso
         p_bar.progress((i + 1) / len(urls))
     
     p_bar.empty()
