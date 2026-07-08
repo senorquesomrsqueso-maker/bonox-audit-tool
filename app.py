@@ -10,6 +10,7 @@ import math
 import os
 import traceback
 import random
+import instaloader
 
 # ==============================================================================
 # 1. CONFIGURACIÓN ESTRUCTURAL 
@@ -369,81 +370,86 @@ def motor_auditor_universal_v32(urls):
 # MOTOR 2: IG SNIPER (EXCLUSIVO INSTAGRAM)
 # ------------------------------------------------------------------------------
 def motor_ig_sniper(urls):
-    """Motor dedicado a Instagram mediante redundancia de APIs residenciales."""
-    API_RAPID = st.secrets.get("API_KEY_RAPID", "")
-    API_SCRAPE = st.secrets.get("API_KEY_SCRAPE", "")
-    
+    """
+    Motor IG Sniper Definitivo: Utiliza inyección de cookies de sesión 
+    para bypassear la seguridad antibot de Instagram.
+    """
     resultados = []
     fallidos = []
     p_bar = st.progress(0)
     status_text = st.empty()
+    
+    # 1. Recuperamos tu huella digital desde los secretos
+    SESSION_ID = st.secrets.get("IG_SESSION_ID", "")
+    
+    if not SESSION_ID:
+        st.error("🚨 ERROR CRÍTICO: No se encontró 'IG_SESSION_ID' en los secrets. El Sniper fallará.")
+        return pd.DataFrame(), pd.DataFrame([{"Link": "Todos", "Error": "Falta Cookie de Sesión"}])
+
+    # 2. Inicializamos el motor de Instaloader de forma silenciosa
+    L = instaloader.Instaloader(
+        quiet=True,
+        download_pictures=False,
+        download_video_thumbnails=False,
+        download_videos=False,
+        download_comments=False
+    )
+    
+    # 3. Inyectamos la cookie de sesión en el motor para simular que eres tú
+    L.context._session.cookies.set("sessionid", SESSION_ID, domain=".instagram.com")
+    L.context._session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    })
 
     for i, raw_url in enumerate(urls):
         url = limpiar_url_instagram(raw_url)
-        status_text.markdown(f"📸 **IG SNIPING ({i+1}/{len(urls)}):** `{url[:40]}...`")
-        data_ig = None
-
-        # INTENTO 1: RAPIDAPI (Estabilidad y formato limpio)
-        if not data_ig and API_RAPID:
-            try:
-                RAPID_HOST = "instagram-scraper-stable-api.p.rapidapi.com"
-                endpoint = "/detailed_reel_data" if "/reel" in url else "/detailed_post_data"
-                headers = {
-                    "x-rapidapi-key": API_RAPID,
-                    "x-rapidapi-host": RAPID_HOST
-                }
-                res = requests.get(f"https://{RAPID_HOST}{endpoint}", headers=headers, params={"url": url}, timeout=15)
-                if res.status_code == 200:
-                    raw = res.json()
-                    item = raw.get('data', raw)
-                    if item and isinstance(item, dict):
-                        data_ig = {
-                            'owner': item.get('owner', {}).get('username', 'N/A'),
-                            'title': item.get('caption', 'N/A'),
-                            'views': int(item.get('video_view_count') or item.get('play_count') or 0),
-                            'likes': int(item.get('like_count') or 0),
-                            'comments': int(item.get('comment_count') or 0)
-                        }
-            except Exception:
-                pass
-
-        # INTENTO 2: SCRAPERAPI (Fallback Extremo)
-        if not data_ig and API_SCRAPE:
-            try:
-                params = {'api_key': API_SCRAPE, 'url': url + "?__a=1&__d=dis"}
-                res = requests.get('https://api.scraperapi.com/', params=params, timeout=15)
-                if res.status_code == 200 and 'graphql' in res.text:
-                    raw = res.json()
-                    item = raw.get('graphql', {}).get('shortcode_media', {})
-                    if item:
-                        data_ig = {
-                            'owner': item.get('owner', {}).get('username', 'N/A'),
-                            'title': "Instagram Media",
-                            'views': int(item.get('video_view_count') or 0),
-                            'likes': int(item.get('edge_media_preview_like', {}).get('count') or 0),
-                            'comments': int(item.get('edge_media_to_parent_comment', {}).get('count') or 0)
-                        }
-            except Exception:
-                pass
-
-        # EVALUACIÓN DE RESULTADO
-        if data_ig:
-            titulo_limpio = str(data_ig['title']).replace('\n', ' ')[:65]
+        status_text.markdown(f"📸 **INFILTRACIÓN IG ({i+1}/{len(urls)}):** `{url[:40]}...`")
+        
+        try:
+            # Extraemos el shortcode (el ID del video/post)
+            match = re.search(r'instagram\.com/(?:p|reel|reels|tv)/([^/?]+)', url)
+            if not match:
+                raise ValueError("No se detectó un ID válido en el enlace.")
+            
+            shortcode = match.group(1)
+            
+            # 4. Extracción táctica de la metadata
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            
+            # Limpieza del título
+            titulo_raw = post.caption if post.caption else "Sin Descripción"
+            titulo_limpio = str(titulo_raw).replace('\n', ' ')[:65]
+            
+            # Verificamos si es video para sacar vistas, si es foto solo likes
+            vistas = post.video_view_count if post.is_video else 0
+            
             resultados.append({
-                "ID": i + 1, "Plataforma": "INSTAGRAM", "Tipo": "Instagram Content",
-                "Creador": data_ig['owner'], "Título": titulo_limpio,
-                "Vistas": data_ig['views'], "Likes": data_ig['likes'],
-                "Comments": data_ig['comments'], "Saves": 0, "Link": raw_url
+                "ID": i + 1, 
+                "Plataforma": "INSTAGRAM", 
+                "Tipo": "Reel" if post.is_video else "Post",
+                "Creador": post.owner_username, 
+                "Título": titulo_limpio,
+                "Vistas": vistas, 
+                "Likes": post.likes,
+                "Comments": post.comments, 
+                "Saves": 0, 
+                "Link": raw_url
             })
-        else:
-            fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Bloqueo detectado o link inválido"})
+            
+            # Pequeña pausa táctica para no alertar a los servidores de IG
+            time.sleep(random.uniform(1.5, 3.5))
+            
+        except instaloader.exceptions.LoginRequiredException:
+            fallidos.append({"ID": i + 1, "Link": raw_url, "Error": "Cookie Expirada. Renueva el SESSION_ID."})
+            break # Si la cookie expira, detenemos el motor para evitar baneos
+        except Exception as e:
+            fallidos.append({"ID": i + 1, "Link": raw_url, "Error": f"Muro IG: {str(e)[:30]}"})
 
         p_bar.progress((i + 1) / len(urls))
 
     p_bar.empty()
     status_text.empty()
     return pd.DataFrame(resultados), pd.DataFrame(fallidos)
-
 # ------------------------------------------------------------------------------
 # MOTOR 3: SEARCH PRO (RADAR TEMPORAL)
 # ------------------------------------------------------------------------------
