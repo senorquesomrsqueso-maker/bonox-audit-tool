@@ -8,3 +8,4 @@ xlsxwriter
 google-generativeai>=0.8.0
 Pillow
 beautifulsoup4
+instaloader
