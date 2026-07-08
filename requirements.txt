@@ -1,6 +1,0 @@
-streamlit
-yt-dlp
-pandas
-requests
-bs4
-instaloader
